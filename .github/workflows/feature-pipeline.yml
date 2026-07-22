@@ -1,0 +1,20 @@
+name: Feature Pipeline
+
+on:
+  push:
+    branches:
+      - "feature/**"
+
+jobs:
+  feature-ci:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Verify Runner
+        run: |
+          echo "Feature pipeline is running!"
+          pwd
+          ls -la
