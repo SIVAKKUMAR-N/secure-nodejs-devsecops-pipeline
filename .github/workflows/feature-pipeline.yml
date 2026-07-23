@@ -13,8 +13,9 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
+      - name: Run Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+
       - name: Verify Runner
         run: |
-          echo "Feature pipeline is running!"
-          pwd
-          ls -la
+          echo "Feature pipeline completed successfully!"
