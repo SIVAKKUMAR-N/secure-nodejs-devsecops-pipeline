@@ -10,12 +10,41 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # Checkout repository
       - name: Checkout Repository
         uses: actions/checkout@v4
 
+      # Secret Scanning
       - name: Run Gitleaks
         uses: gitleaks/gitleaks-action@v2
 
-      - name: Verify Runner
-        run: |
-          echo "Feature pipeline completed successfully!"
+      # Setup Node.js
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # Install project dependencies
+      - name: Install Dependencies
+        run: npm ci
+
+      # Run automated tests
+      - name: Run Tests
+        run: npm test
+
+      # Install NoVuln CLI
+      - name: Install NoVuln
+        run: npm install -g novuln-backend
+
+      # Run SAST scan
+      - name: Run NoVuln Scan
+        run: novuln scan . --ci
+
+      # Upload scan reports
+      - name: Upload NoVuln Reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: novuln-security-report
+          path: |
+            report.json
+            summary.json
