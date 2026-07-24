@@ -14,15 +14,23 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # Secret Scanning
-      - name: Run Gitleaks
-        uses: gitleaks/gitleaks-action@v2
-
       # Setup Node.js
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 22
+
+      # Install Gitleaks CLI
+      - name: Install Gitleaks
+        run: |
+          wget https://github.com/gitleaks/gitleaks/releases/latest/download/gitleaks_8.28.0_linux_x64.tar.gz
+          tar -xzf gitleaks_8.28.0_linux_x64.tar.gz
+          sudo mv gitleaks /usr/local/bin/
+
+      # Run Secret Scan
+      - name: Run Gitleaks Scan
+        run: |
+          gitleaks detect --source . --verbose
 
       # Install project dependencies
       - name: Install Dependencies
@@ -36,7 +44,7 @@ jobs:
       - name: Install NoVuln
         run: npm install -g novuln-backend
 
-      # Run SAST scan
+      # Run SAST Scan
       - name: Run NoVuln Scan
         run: novuln scan . --ci
 
