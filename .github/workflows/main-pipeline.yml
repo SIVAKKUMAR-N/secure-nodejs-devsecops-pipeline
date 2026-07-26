@@ -81,7 +81,7 @@ jobs:
       # Trivy Scan
       # ==========================
       - name: Run Trivy
-        uses: aquasecurity/trivy-action@0.33.1
+        uses: aquasecurity/trivy-action@master
         with:
           image-ref: simple-crud-app:latest
           format: json
