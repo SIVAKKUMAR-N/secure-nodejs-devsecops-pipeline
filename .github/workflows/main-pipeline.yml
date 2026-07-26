@@ -1,0 +1,109 @@
+name: Main Pipeline
+
+on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - synchronize
+      - reopened
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  security-pipeline:
+    runs-on: ubuntu-latest
+
+    steps:
+      # ==========================
+      # Checkout Repository
+      # ==========================
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      # ==========================
+      # Setup Node.js
+      # ==========================
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # ==========================
+      # Install Dependencies
+      # ==========================
+      - name: Install Dependencies
+        run: npm ci
+
+      # ==========================
+      # NoVuln SAST Scan
+      # Generates:
+      # report.json
+      # summary.json
+      # ==========================
+      - name: Run NoVuln
+        run: |
+          npx novuln scan --ci
+
+      # ==========================
+      # Dependency Vulnerability Scan
+      # Generates:
+      # audit.json
+      # ==========================
+      - name: Run npm Audit
+        run: |
+          npm audit --json > audit.json || true
+
+      # ==========================
+      # Generate CycloneDX SBOM
+      # Generates:
+      # sbom.json
+      # ==========================
+      - name: Generate SBOM
+        run: |
+          npx @cyclonedx/cyclonedx-npm \
+            --output-file sbom.json
+
+      # ==========================
+      # Build Docker Image
+      # ==========================
+      - name: Build Docker Image
+        run: |
+          docker build -t simple-crud-app:latest .
+
+      # ==========================
+      # Trivy Container Scan
+      # Generates:
+      # trivy-report.json
+      # ==========================
+      - name: Run Trivy Scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: simple-crud-app:latest
+          format: json
+          output: trivy-report.json
+
+      # ==========================
+      # Upload Security Reports
+      # ==========================
+      - name: Upload Security Reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-reports
+          path: |
+            report.json
+            summary.json
+            audit.json
+            sbom.json
+            trivy-report.json
+
+      # ==========================
+      # Security Gate
+      # ==========================
+      - name: Security Gate
+        run: |
+          echo "Security Gate will be implemented in the next step."
