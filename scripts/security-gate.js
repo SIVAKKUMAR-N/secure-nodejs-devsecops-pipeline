@@ -1,198 +1,576 @@
 const fs = require("fs");
+const path = require("path");
 
-console.log("========================================");
-console.log("         SECURITY GATE");
-console.log("========================================");
+const startTime = Date.now();
+
+console.log(`
+========================================
+          SECURITY GATE v2
+========================================
+`);
+
 
 let failed = false;
 let reasons = [];
+let results = {};
+
+
+// =====================================
+// Helpers
+// =====================================
+
+function loadJSON(file) {
+
+    try {
+
+        return JSON.parse(
+            fs.readFileSync(file, "utf8")
+        );
+
+    } catch (error) {
+
+        failed = true;
+
+        reasons.push(
+            `Unable to read JSON: ${file}`
+        );
+
+        return {};
+
+    }
+
+}
+
+
+function fileExists(file) {
+
+    return fs.existsSync(file);
+
+}
+
+
+function status(ok){
+
+    return ok ? "PASS" : "FAIL";
+
+}
+
 
 // =====================================
 // Load Security Policy
 // =====================================
 
-const POLICY = JSON.parse(
-  fs.readFileSync("policy/security-policy.json", "utf8")
+const POLICY_PATH =
+    "policy/security-policy.json";
+
+
+if (!fileExists(POLICY_PATH)) {
+
+    console.log(
+        "❌ Security policy missing"
+    );
+
+    process.exit(1);
+
+}
+
+
+const POLICY = loadJSON(POLICY_PATH);
+
+
+
+console.log("\n========== SECURITY POLICY ==========");
+
+console.log(
+    JSON.stringify(
+        POLICY,
+        null,
+        2
+    )
 );
 
+
+
 // =====================================
-// Check Required Reports
+// Required Reports
 // =====================================
 
 const requiredFiles = [
-  "summary.json",
-  "audit.json",
-  "trivy-report.json"
+
+    "summary.json",
+    "audit.json",
+    "trivy-report.json"
+
 ];
 
-if (POLICY.sbom.required) {
-  requiredFiles.push("sbom.json");
+
+if (POLICY.sbom?.required) {
+
+    requiredFiles.push(
+        "sbom.json"
+    );
+
 }
+
+
+
+console.log("\n========== REPORT VALIDATION ==========");
+
 
 for (const file of requiredFiles) {
-  if (!fs.existsSync(file)) {
-    failed = true;
-    reasons.push(`Missing required report: ${file}`);
-  }
+
+
+    if(fileExists(file)){
+
+        console.log(
+            `✅ ${file}`
+        );
+
+    }
+
+    else{
+
+        failed = true;
+
+        reasons.push(
+            `Missing report: ${file}`
+        );
+
+
+        console.log(
+            `❌ ${file}`
+        );
+
+    }
+
 }
 
-if (failed) {
-  console.log("\n❌ SECURITY GATE FAILED\n");
 
-  console.log("Reasons:");
-  reasons.forEach((reason) => console.log(`- ${reason}`));
 
-  process.exit(1);
+if(failed){
+
+    finish();
+
 }
 
-// =====================================
-// Read Reports
-// =====================================
 
-const summary = JSON.parse(
-  fs.readFileSync("summary.json", "utf8")
-);
-
-const audit = JSON.parse(
-  fs.readFileSync("audit.json", "utf8")
-);
-
-const trivy = JSON.parse(
-  fs.readFileSync("trivy-report.json", "utf8")
-);
 
 // =====================================
-// Parse npm Audit
+// Load Reports
 // =====================================
 
-const auditSummary = audit.metadata.vulnerabilities;
+const summary =
+    loadJSON("summary.json");
+
+
+const audit =
+    loadJSON("audit.json");
+
+
+const trivy =
+    loadJSON("trivy-report.json");
+
+
+
+
+// =====================================
+// Parse npm audit
+// =====================================
+
+
+const auditSummary =
+    audit.metadata?.vulnerabilities || {
+
+        critical:0,
+        high:0,
+        moderate:0,
+        low:0
+
+    };
+
+
+
 
 // =====================================
 // Parse Trivy
 // =====================================
 
+
 const trivySummary = {
-  critical: 0,
-  high: 0,
-  medium: 0,
-  low: 0
+
+    critical:0,
+    high:0,
+    medium:0,
+    low:0
+
 };
 
-for (const result of trivy.Results || []) {
 
-  for (const vuln of result.Vulnerabilities || []) {
 
-    switch (vuln.Severity) {
+for(const result of trivy.Results || []){
 
-      case "CRITICAL":
-        trivySummary.critical++;
-        break;
 
-      case "HIGH":
-        trivySummary.high++;
-        break;
+    for(const vuln of result.Vulnerabilities || []){
 
-      case "MEDIUM":
-        trivySummary.medium++;
-        break;
 
-      case "LOW":
-        trivySummary.low++;
-        break;
+        const severity =
+            vuln.Severity?.toLowerCase();
+
+
+        if(trivySummary[severity] !== undefined){
+
+            trivySummary[severity]++;
+
+        }
+
 
     }
 
-  }
 
 }
 
-// =====================================
-// Print Scan Results
-// =====================================
 
-console.log("\n========== NoVuln ==========");
-console.log(`Critical : ${summary.critical}`);
-console.log(`High     : ${summary.high}`);
-console.log(`Medium   : ${summary.medium}`);
-console.log(`Low      : ${summary.low}`);
 
-console.log("\n========== npm audit ==========");
-console.log(`Critical : ${auditSummary.critical}`);
-console.log(`High     : ${auditSummary.high}`);
-console.log(`Moderate : ${auditSummary.moderate}`);
-console.log(`Low      : ${auditSummary.low}`);
-
-console.log("\n========== Trivy ==========");
-console.log(`Critical : ${trivySummary.critical}`);
-console.log(`High     : ${trivySummary.high}`);
-console.log(`Medium   : ${trivySummary.medium}`);
-console.log(`Low      : ${trivySummary.low}`);
-
-console.log("\n========== CycloneDX ==========");
-console.log("SBOM Generated : YES");
 
 // =====================================
-// Generic Policy Evaluation
+// Scanner Evaluation
 // =====================================
 
-function evaluate(toolName, result, policy) {
 
-  for (const severity in policy) {
+function evaluateScanner(
+    name,
+    report,
+    policy
+){
 
-    if (severity === "required") continue;
 
-    const found = result[severity] || 0;
-    const allowed = policy[severity];
+    let scannerFailed = false;
 
-    if (found > allowed) {
 
-      failed = true;
+    for(const severity in policy){
 
-      reasons.push(
-        `${toolName}: ${severity.toUpperCase()} = ${found} (Allowed: ${allowed})`
-      );
+
+        if(
+            severity === "required"
+        ){
+
+            continue;
+
+        }
+
+
+        const found =
+            report[severity] || 0;
+
+
+        const allowed =
+            policy[severity];
+
+
+
+        if(found > allowed){
+
+
+            scannerFailed = true;
+
+
+            reasons.push(
+
+                `${name}: ${severity.toUpperCase()} found ${found}, allowed ${allowed}`
+
+            );
+
+
+        }
+
 
     }
 
-  }
+
+
+    results[name] =
+        status(!scannerFailed);
+
+
+
+    if(scannerFailed){
+
+        failed = true;
+
+    }
+
 
 }
 
-evaluate("NoVuln", summary, POLICY.novuln);
 
-evaluate(
-  "npm audit",
-  {
-    critical: auditSummary.critical,
-    high: auditSummary.high,
-    moderate: auditSummary.moderate,
-    low: auditSummary.low
-  },
-  POLICY.audit
+
+
+evaluateScanner(
+
+    "NoVuln",
+
+    summary,
+
+    POLICY.novuln
+
 );
 
-evaluate("Trivy", trivySummary, POLICY.trivy);
+
+
+evaluateScanner(
+
+    "npm Audit",
+
+    {
+
+        critical:auditSummary.critical,
+        high:auditSummary.high,
+        moderate:auditSummary.moderate,
+        low:auditSummary.low
+
+    },
+
+    POLICY.audit
+
+);
+
+
+
+evaluateScanner(
+
+    "Trivy",
+
+    trivySummary,
+
+    POLICY.trivy
+
+);
+
+
+
+if(POLICY.sbom?.required){
+
+    results["SBOM"] =
+        fileExists("sbom.json")
+            ? "PASS"
+            : "FAIL";
+
+}
+
+
+
+// =====================================
+// Summary Table
+// =====================================
+
+
+console.log(`
+
+========== SECURITY SUMMARY ==========
+
+Scanner              Status
+--------------------------------------
+
+`);
+
+
+
+for(const tool in results){
+
+    console.log(
+
+        `${tool.padEnd(20)} ${results[tool]}`
+
+    );
+
+}
+
+
+
+console.log(
+`
+--------------------------------------
+Violations: ${reasons.length}
+`
+);
+
+
+
+
+// =====================================
+// GitHub Actions Summary
+// =====================================
+
+
+function githubSummary(){
+
+
+    if(!process.env.GITHUB_STEP_SUMMARY){
+
+        return;
+
+    }
+
+
+    let output =
+`
+# Security Gate v2
+
+| Scanner | Status |
+|---|---|
+`;
+
+
+    for(const tool in results){
+
+        output +=
+        `| ${tool} | ${results[tool]} |\n`;
+
+    }
+
+
+
+    output +=
+`
+## Decision
+
+${failed ? "❌ BLOCKED" : "✅ APPROVED"}
+
+Violations:
+${reasons.length}
+
+`;
+
+
+
+    fs.appendFileSync(
+
+        process.env.GITHUB_STEP_SUMMARY,
+
+        output
+
+    );
+
+
+}
+
+
+
+githubSummary();
+
+
+
+// =====================================
+// Generate Result JSON
+// =====================================
+
+
+const executionTime =
+    ((Date.now()-startTime)/1000)
+    .toFixed(2);
+
+
+
+const finalResult = {
+
+
+    status:
+        failed
+        ? "FAILED"
+        : "PASSED",
+
+
+    violations:
+        reasons.length,
+
+
+    scanners:
+        results,
+
+
+    executionTime:
+        `${executionTime}s`,
+
+
+    timestamp:
+        new Date().toISOString(),
+
+
+    reasons
+
+};
+
+
+
+fs.writeFileSync(
+
+    "security-gate-result.json",
+
+    JSON.stringify(
+
+        finalResult,
+
+        null,
+
+        2
+
+    )
+
+);
+
+
+
+
 
 // =====================================
 // Final Decision
 // =====================================
 
-console.log("\n========================================");
 
-if (failed) {
+function finish(){
 
-  console.log("❌ SECURITY GATE FAILED\n");
 
-  console.log("Reason(s):");
+    console.log(
+`
+========================================
+`
+    );
 
-  reasons.forEach((reason) => {
-    console.log(`- ${reason}`);
-  });
 
-  process.exit(1);
+    if(failed){
+
+
+        console.log(
+            "❌ SECURITY GATE FAILED"
+        );
+
+
+        console.log("\nReasons:");
+
+        reasons.forEach(r =>
+            console.log(
+                "- " + r
+            )
+        );
+
+
+        process.exit(1);
+
+    }
+
+
+
+    console.log(
+        "✅ SECURITY GATE PASSED"
+    );
+
+
+    process.exit(0);
+
 
 }
 
-console.log("✅ SECURITY GATE PASSED");
 
-process.exit(0);
+
+
+finish();
