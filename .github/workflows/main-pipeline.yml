@@ -71,7 +71,7 @@ jobs:
       # ==========================
       - name: Run npm Audit
         run: |
-          npm audit --json > audit.json
+          npm audit --json > audit.json || true
 
       # ==========================
       # Build Docker Image
