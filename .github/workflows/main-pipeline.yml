@@ -9,10 +9,6 @@ on:
       - synchronize
       - reopened
 
-permissions:
-  contents: read
-  security-events: write
-
 jobs:
   security-pipeline:
     runs-on: ubuntu-latest
@@ -31,7 +27,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
 
       # ==========================
       # Install Dependencies
@@ -40,33 +35,32 @@ jobs:
         run: npm ci
 
       # ==========================
-      # NoVuln SAST Scan
-      # Generates:
-      # report.json
-      # summary.json
+      # Gitleaks
+      # ==========================
+      - name: Run Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # ==========================
+      # Run Tests
+      # ==========================
+      - name: Run Tests
+        run: npm test -- --ci
+
+      # ==========================
+      # NoVuln Scan
       # ==========================
       - name: Run NoVuln
         run: |
-          npx novuln scan --ci
+          npx -p novuln-backend novuln scan --ci
 
       # ==========================
-      # Dependency Vulnerability Scan
-      # Generates:
-      # audit.json
+      # npm Audit
       # ==========================
       - name: Run npm Audit
         run: |
-          npm audit --json > audit.json || true
-
-      # ==========================
-      # Generate CycloneDX SBOM
-      # Generates:
-      # sbom.json
-      # ==========================
-      - name: Generate SBOM
-        run: |
-          npx @cyclonedx/cyclonedx-npm \
-            --output-file sbom.json
+          npm audit --json > audit.json
 
       # ==========================
       # Build Docker Image
@@ -76,21 +70,35 @@ jobs:
           docker build -t simple-crud-app:latest .
 
       # ==========================
-      # Trivy Container Scan
-      # Generates:
-      # trivy-report.json
+      # Generate CycloneDX SBOM
       # ==========================
-      - name: Run Trivy Scan
-        uses: aquasecurity/trivy-action@master
+      - name: Generate CycloneDX SBOM
+        run: |
+          npx @cyclonedx/cyclonedx-npm \
+            --output-file sbom.json
+
+      # ==========================
+      # Trivy Scan
+      # ==========================
+      - name: Run Trivy
+        uses: aquasecurity/trivy-action@0.33.1
         with:
           image-ref: simple-crud-app:latest
           format: json
           output: trivy-report.json
 
       # ==========================
+      # Security Gate
+      # ==========================
+      - name: Security Gate
+        run: |
+          node scripts/security-gate.js
+
+      # ==========================
       # Upload Security Reports
       # ==========================
       - name: Upload Security Reports
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: security-reports
@@ -100,10 +108,3 @@ jobs:
             audit.json
             sbom.json
             trivy-report.json
-
-      # ==========================
-      # Security Gate
-      # ==========================
-      - name: Security Gate
-        run: |
-          echo "Security Gate will be implemented in the next step."
