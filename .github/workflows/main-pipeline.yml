@@ -51,7 +51,7 @@ jobs:
       # Install Dependencies
       # ==========================
       - name: Install Dependencies
-        run: npm ci
+        run: npm ci --omit=dev
 
       # ==========================
       # Run Tests
