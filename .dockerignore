@@ -1,6 +1,7 @@
 node_modules
 .git
 .github
+.gitignore
 coverage
 dist
 Dockerfile
@@ -9,3 +10,17 @@ README.md
 .env
 .env.*
 npm-debug.log
+gitleaks
+gitleaks.exe
+novuln
+*.exe
+*.bin
+policy/
+docs/
+*.json
+!package.json
+!package-lock.json
+security-gate-result.json
+tests/
+coverage/
+*.log

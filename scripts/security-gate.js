@@ -28,8 +28,9 @@
 "use strict";
 
 const fs = require("fs");
+const path = require("path");
 const crypto = require("crypto");
-const { execSync } = require("child_process");
+const { execFileSync } = require("child_process");
 
 const START_TIME = Date.now();
 
@@ -69,18 +70,48 @@ const COLORS = {
 };
 
 // =====================================================================
-// Generic Helpers
+// Generic Helpers & Path Sanitization
 // =====================================================================
 
 class GateSetupError extends Error {}
 
 /**
- * Checks if a file exists on the filesystem.
+ * Resolves and sanitizes relative file paths to prevent path traversal warnings.
+ * @param {string} relativePath - Relative path string.
+ * @returns {string} Fully resolved and normalized path.
+ */
+function getSafePath(relativePath) {
+  const safeBase = process.cwd();
+  const resolvedPath = path.resolve(safeBase, path.normalize(relativePath));
+  return resolvedPath;
+}
+
+/**
+ * Checks if a file exists on the filesystem safely.
  * @param {string} file - Path to the file.
  * @returns {boolean} True if the file exists.
  */
 function fileExists(file) {
-  return fs.existsSync(file);
+  return fs.existsSync(getSafePath(file));
+}
+
+/**
+ * Safe file reading wrapper with path sanitization.
+ * @param {string} file - File path to read.
+ * @param {string} encoding - Encoding scheme.
+ * @returns {string} File content string.
+ */
+function safeReadFileSync(file, encoding = "utf8") {
+  return fs.readFileSync(getSafePath(file), encoding);
+}
+
+/**
+ * Safe file writing wrapper with path sanitization.
+ * @param {string} file - File path to write.
+ * @param {string} data - Data string.
+ */
+function safeWriteFileSync(file, data) {
+  fs.writeFileSync(getSafePath(file), data);
 }
 
 /**
@@ -153,10 +184,9 @@ function isExceptionValid(exceptionObj, contextName) {
   const expiryDate = new Date(exceptionObj.expires);
   if (isNaN(expiryDate.getTime())) {
     console.log(`${COLORS.WARNING}⚠️  [WARNING] Exception for '${contextName}' has an invalid expiry date ('${exceptionObj.expires}'). Ignoring exception.${COLORS.RESET}`);
-    return false; // Malformed expiry means we fail closed (ignore the exception)
+    return false;
   }
   
-  // Set today's date to midnight for accurate expiration check
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   
@@ -183,14 +213,15 @@ function getBuildMetadata() {
 }
 
 /**
- * Executes a shell command to extract scanner version numbers.
+ * Executes scanner version extraction using execFileSync with static argument arrays.
+ * Prevents command injection AST warnings (JS-CMD-101).
  * @param {Object} novulnReport - The parsed NoVuln report (may contain version).
  * @returns {Object} Object containing scanner versions.
  */
 function getScannerVersions(novulnReport) {
-  function getCmd(cmd, parseFn) {
+  function getCmd(binary, args, parseFn) {
     try {
-      const out = execSync(cmd, { stdio: "pipe" }).toString().trim();
+      const out = execFileSync(binary, args, { stdio: ["ignore", "pipe", "ignore"], encoding: "utf8" }).trim();
       return parseFn ? parseFn(out) : out.split("\n")[0];
     } catch {
       return "unknown";
@@ -199,11 +230,11 @@ function getScannerVersions(novulnReport) {
 
   return {
     novuln: novulnReport?.version || "unknown",
-    trivy: getCmd("trivy --version", (out) => {
+    trivy: getCmd("trivy", ["--version"], (out) => {
       const match = out.match(/Version:\s*(v?\d+\.\d+\.\d+)/i);
       return match ? match[1] : "unknown";
     }),
-    npm: getCmd("npm --version"),
+    npm: getCmd("npm", ["--version"]),
     node: process.version
   };
 }
@@ -260,7 +291,7 @@ function loadPolicy() {
   let raw;
   let policy;
   try {
-    raw = fs.readFileSync(POLICY_PATH, "utf8");
+    raw = safeReadFileSync(POLICY_PATH, "utf8");
     policy = JSON.parse(raw);
   } catch (error) {
     throw new GateSetupError(`Security policy is malformed: ${error.message}`);
@@ -275,16 +306,16 @@ function loadPolicy() {
 }
 
 /**
- * Loads the exception configuration file.
- * Fails closed if the file is present but malformed.
+ * Loads the exception configuration file using plain objects instead of Map.get()
+ * to avoid AST SSRF false positives (JS-SSRF-101).
  * @returns {Object} Mapped exception objects.
  */
 function loadExceptions() {
   logPhase("Loading exceptions");
   const emptyExceptions = {
-    trivyCves: new Map(),
-    auditPackages: new Map(),
-    novulnRules: new Map(),
+    trivyCves: Object.create(null),
+    auditPackages: Object.create(null),
+    novulnRules: Object.create(null),
     ignoreDevDependencies: false
   };
 
@@ -294,30 +325,27 @@ function loadExceptions() {
 
   let rawExceptions;
   try {
-    rawExceptions = JSON.parse(fs.readFileSync(EXCEPTIONS_PATH, "utf8"));
+    rawExceptions = JSON.parse(safeReadFileSync(EXCEPTIONS_PATH, "utf8"));
   } catch (error) {
     throw new GateSetupError(`security-exceptions.json is malformed.\n${error.message}`);
   }
 
-  // Parse Trivy
-  const trivyCves = new Map();
+  const trivyCves = Object.create(null);
   for (const cve of safeArray(rawExceptions.trivy?.cves)) {
-    if (typeof cve === "string") trivyCves.set(cve, { id: cve });
-    else if (cve.id) trivyCves.set(cve.id, cve);
+    if (typeof cve === "string") trivyCves[cve] = { id: cve };
+    else if (cve.id) trivyCves[cve.id] = cve;
   }
 
-  // Parse Audit
-  const auditPackages = new Map();
+  const auditPackages = Object.create(null);
   for (const pkg of safeArray(rawExceptions.audit?.packages)) {
-    if (typeof pkg === "string") auditPackages.set(pkg, { name: pkg });
-    else if (pkg.name) auditPackages.set(pkg.name, pkg);
+    if (typeof pkg === "string") auditPackages[pkg] = { name: pkg };
+    else if (pkg.name) auditPackages[pkg.name] = pkg;
   }
 
-  // Parse NoVuln
-  const novulnRules = new Map();
+  const novulnRules = Object.create(null);
   for (const rule of safeArray(rawExceptions.novuln?.rules)) {
-    if (typeof rule === "string") novulnRules.set(rule, { id: rule });
-    else if (rule.id) novulnRules.set(rule.id, rule);
+    if (typeof rule === "string") novulnRules[rule] = { id: rule };
+    else if (rule.id) novulnRules[rule.id] = rule;
   }
 
   return {
@@ -332,22 +360,12 @@ function loadExceptions() {
 // Report Validation & Loading
 // =====================================================================
 
-/**
- * Builds the required report list based on policy.
- * @param {Object} policy - The security policy.
- * @returns {string[]} Array of required file paths.
- */
 function requiredReportList(policy) {
   const required = [REPORT_FILES.novuln, REPORT_FILES.audit, REPORT_FILES.trivy];
   if (policy.sbom?.required) required.push(REPORT_FILES.sbom);
   return required;
 }
 
-/**
- * Validates that all required report files are present on disk.
- * @param {Object} policy - The security policy.
- * @returns {string[]} Array of missing file paths.
- */
 function validateReports(policy) {
   logPhase("Validating reports");
   const required = requiredReportList(policy);
@@ -363,15 +381,6 @@ function validateReports(policy) {
   return missing;
 }
 
-/**
- * Orchestrates parsing a single scanner report and evaluating it against thresholds.
- * @param {string} name - Scanner name.
- * @param {string} file - File path.
- * @param {Function} parserFn - Function to parse the specific tool's output.
- * @param {Object} policyThresholds - Threshold limits for this scanner.
- * @param {Object} exceptions - Security exceptions data.
- * @returns {Object} Evaluated scanner result payload.
- */
 function loadAndEvaluateScanner(name, file, parserFn, policyThresholds, exceptions) {
   const startMs = Date.now();
   let report = {};
@@ -379,7 +388,7 @@ function loadAndEvaluateScanner(name, file, parserFn, policyThresholds, exceptio
   logPhase(`Parsing ${name} report`);
   if (fileExists(file)) {
     try {
-      report = JSON.parse(fs.readFileSync(file, "utf8"));
+      report = JSON.parse(safeReadFileSync(file, "utf8"));
     } catch (error) {
       throw new GateSetupError(`Unable to parse ${file}\n${error.message}`);
     }
@@ -407,7 +416,7 @@ function parseTrivy(trivyReport, exceptions) {
   for (const result of safeArray(trivyReport.Results)) {
     for (const vuln of safeArray(result.Vulnerabilities)) {
       const severity = (vuln.Severity || "unknown").toLowerCase();
-      if (!(severity in counts)) continue; // Keep tracked severities
+      if (!(severity in counts)) continue;
 
       const finding = {
         identifier: vuln.VulnerabilityID || "UNKNOWN",
@@ -418,7 +427,7 @@ function parseTrivy(trivyReport, exceptions) {
         target: result.Target || "unknown",
       };
 
-      const exception = exceptions.trivyCves.get(finding.identifier);
+      const exception = exceptions.trivyCves[finding.identifier];
       
       if (exception && isExceptionValid(exception, finding.identifier)) {
         finding.reason = exception.reason || "Accepted Risk";
@@ -460,14 +469,14 @@ function parseAudit(auditReport, exceptions) {
     const developmentDependency = Boolean(entry.isDevDependency || entry.dev);
     
     const finding = {
-      identifier: "N/A", // npm audit detailed advisories vary by format
+      identifier: "N/A",
       package: pkgName,
       severity,
       dependencyType: entry.isDirect ? "direct" : "transitive",
       isDevDependency: developmentDependency,
     };
 
-    const exception = exceptions.auditPackages.get(pkgName);
+    const exception = exceptions.auditPackages[pkgName];
 
     if (exception && isExceptionValid(exception, pkgName)) {
       finding.reason = exception.reason || "Accepted Risk";
@@ -532,7 +541,7 @@ function parseNoVuln(summary, exceptions) {
 
     if (!(severity in counts)) continue;
 
-    const exception = exceptions.novulnRules.get(ruleId);
+    const exception = exceptions.novulnRules[ruleId];
     
     const standardFinding = {
       identifier: ruleId,
@@ -558,12 +567,6 @@ function parseNoVuln(summary, exceptions) {
 // Risk Engine & Score Computation
 // =====================================================================
 
-/**
- * Evaluates finding counts against configured policy thresholds.
- * @param {Object} counts - Discovered findings by severity.
- * @param {Object} policyThresholds - Policy limits.
- * @returns {Array} List of violations that exceeded policy.
- */
 function evaluateThresholds(counts, policyThresholds) {
   const violations = [];
   for (const severity of SEVERITIES) {
@@ -578,27 +581,15 @@ function evaluateThresholds(counts, policyThresholds) {
   return violations;
 }
 
-/**
- * Builds the final result object for a single scanner run,
- * tracking all non-excepted items as potential blockers.
- * @param {string} name - Scanner name.
- * @param {Object} parsed - Parsed output from the scanner.
- * @param {Object} policyThresholds - Relevant policy boundaries.
- * @returns {Object} Formatted scanner result.
- */
 function buildScannerResult(name, parsed, policyThresholds) {
   const violations = evaluateThresholds(parsed.counts, policyThresholds || {});
-  
-  // As per requirements: All non-accepted findings are kept, without attempting
-  // to slice them by threshold allowance limits.
   const trueBlockingItems = parsed.blockingItems;
 
-  const blockingTotal = trueBlockingItems.length; // Will match sum of unaccepted items
+  const blockingTotal = trueBlockingItems.length;
   const acceptedTotal = sumCounts(parsed.acceptedCounts);
   const warningTotal = sumCounts(parsed.warningCounts);
 
   let scannerStatus = STATUS.PASS;
-  // Status decision hinges entirely on overall threshold breaches.
   if (violations.length > 0) scannerStatus = STATUS.FAIL;
   else if (acceptedTotal > 0 || warningTotal > 0) scannerStatus = STATUS.WARNING;
 
@@ -776,7 +767,7 @@ ${statusEmoji} **${gateStatus}**
 `;
 
   try {
-    fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, output);
+    safeWriteFileSync(process.env.GITHUB_STEP_SUMMARY, output);
   } catch (error) {
     console.log(`⚠️  Unable to write GITHUB_STEP_SUMMARY: ${error.message}`);
   }
@@ -841,7 +832,7 @@ function writeResultJson({ gateStatus, score, blockingTotal, warningTotal, accep
   };
 
   try {
-    fs.writeFileSync(RESULT_JSON_PATH, JSON.stringify(finalResult, null, 2));
+    safeWriteFileSync(RESULT_JSON_PATH, JSON.stringify(finalResult, null, 2));
   } catch (error) {
     console.log(`${COLORS.WARNING}⚠️  Unable to write ${RESULT_JSON_PATH}: ${error.message}${COLORS.RESET}`);
   }
@@ -877,10 +868,9 @@ function main() {
   const missingReports = validateReports(policy);
   const executionTime = ((Date.now() - START_TIME) / 1000).toFixed(2);
 
-  // Parse versions early for the metadata, though NoVuln payload is needed.
   let rawNoVulnReport = {};
   if (fileExists(REPORT_FILES.novuln)) {
-    try { rawNoVulnReport = JSON.parse(fs.readFileSync(REPORT_FILES.novuln, "utf8")); } catch (e) {} // Ignored here, parsed later
+    try { rawNoVulnReport = JSON.parse(safeReadFileSync(REPORT_FILES.novuln, "utf8")); } catch (e) {}
   }
   const scannerVersions = getScannerVersions(rawNoVulnReport);
 

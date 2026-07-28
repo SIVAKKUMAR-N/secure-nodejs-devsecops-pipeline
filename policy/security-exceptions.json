@@ -8,17 +8,14 @@
       }
     ]
   },
-
   "audit": {
     "ignoreDevDependencies": true,
-
     "packages": [
       {
         "name": "jest",
         "reason": "Development dependency",
         "expires": "2027-01-01"
       },
-
       {
         "name": "eslint",
         "reason": "Development tool",
@@ -26,7 +23,6 @@
       }
     ]
   },
-
   "novuln": {
     "rules": [
       {
