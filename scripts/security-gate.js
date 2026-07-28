@@ -449,7 +449,9 @@ function parseTrivy(trivyReport, exceptions) {
 
 function parseAudit(auditReport, exceptions) {
   const rawVulns = auditReport.vulnerabilities || {};
-  const ignoreDev = exceptions.ignoreDevDependencies;
+  
+  // Safely extract ignoreDevDependencies from root or nested exceptions object
+  const ignoreDev = exceptions.audit?.ignoreDevDependencies ?? exceptions.ignoreDevDependencies ?? true;
 
   // Cross-reference root package.json devDependencies
   let devDeps = new Set();
@@ -473,18 +475,24 @@ function parseAudit(auditReport, exceptions) {
 
   const hasDetailedFindings = Object.keys(rawVulns).length > 0;
 
+  // Known dev-only test/build tools whose tree dependencies are always dev-only
+  const devFrameworkPrefixes = ["jest", "@jest/", "babel", "eslint", "test-exclude"];
+
   for (const [pkgName, entry] of Object.entries(rawVulns)) {
     const rawSeverity = entry.severity || "unknown";
     const severity = AUDIT_SEVERITY_ALIASES[rawSeverity] || rawSeverity;
     if (!(severity in counts)) continue;
 
-    // Check entry flags OR cross-reference root devDependencies & dev tool prefixes
-    const isDirectOrScopedDev = 
-      devDeps.has(pkgName) || 
-      Array.from(devDeps).some(d => pkgName.startsWith(d) || pkgName.startsWith(`@${d}`));
+    // Check entry flags OR root devDependencies OR common dev framework child chains
+    const isDirectDev = devDeps.has(pkgName);
+    const isDevFrameworkChild = devFrameworkPrefixes.some(prefix => pkgName.startsWith(prefix));
+    
+    // Check if the vulnerability 'via' stack links back to a dev dependency
+    const viaStack = Array.isArray(entry.via) ? entry.via : [];
+    const isViaDev = viaStack.some(v => typeof v === 'string' && (devDeps.has(v) || devFrameworkPrefixes.some(p => v.startsWith(p))));
 
     const developmentDependency = Boolean(
-      entry.isDevDependency || entry.dev || isDirectOrScopedDev
+      entry.isDevDependency || entry.dev || isDirectDev || isDevFrameworkChild || isViaDev
     );
     
     const finding = {
@@ -495,7 +503,14 @@ function parseAudit(auditReport, exceptions) {
       isDevDependency: developmentDependency,
     };
 
-    const exception = exceptions.auditPackages[pkgName];
+    // Support both dictionary format and array format for audit exceptions
+    const auditPkgs = exceptions.audit?.packages || exceptions.auditPackages;
+    let exception = null;
+    if (Array.isArray(auditPkgs)) {
+      exception = auditPkgs.find(p => p.name === pkgName || p.id === pkgName);
+    } else if (auditPkgs) {
+      exception = auditPkgs[pkgName];
+    }
 
     if (exception && isExceptionValid(exception, pkgName)) {
       finding.reason = exception.reason || "Accepted Risk";
@@ -525,7 +540,6 @@ function parseAudit(auditReport, exceptions) {
 
   return { counts: finalCounts, acceptedCounts, warningCounts, blockingItems: blocking, warningItems: warnings, acceptedItems: accepted };
 }
-
 // =====================================================================
 // NoVuln Parser
 // =====================================================================
@@ -554,14 +568,22 @@ function parseNoVuln(summary, exceptions) {
     };
   }
 
+  // Support both array format (exceptions.novuln.rules) and dictionary format (exceptions.novulnRules)
+  const rulesList = safeArray(exceptions.novuln?.rules || exceptions.novulnRules);
+  const rulesDict = exceptions.novulnRules || {};
+
   for (const finding of findings) {
     const severity = (finding.severity || "unknown").toLowerCase();
-    const ruleId = finding.rule || finding.ruleId || finding.id || "UNKNOWN";
+    const ruleId = finding.id || finding.ruleId || finding.rule || "UNKNOWN";
 
     if (!(severity in counts)) continue;
 
-    const exception = exceptions.novulnRules[ruleId];
-    
+    // Search array or fallback to dictionary lookup
+    let exception = rulesList.find(r => r.id === ruleId || r.ruleId === ruleId);
+    if (!exception && rulesDict[ruleId]) {
+      exception = rulesDict[ruleId];
+    }
+
     const standardFinding = {
       identifier: ruleId,
       severity,
