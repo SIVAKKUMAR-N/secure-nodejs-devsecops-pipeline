@@ -7,4 +7,5 @@ Dockerfile
 .dockerignore
 README.md
 .env
+.env.*
 npm-debug.log

@@ -1,0 +1,39 @@
+{
+  "trivy": {
+    "cves": [
+      {
+        "id": "CVE-2025-12345",
+        "reason": "Vendor patch not yet available",
+        "expires": "2026-12-31"
+      }
+    ]
+  },
+
+  "audit": {
+    "ignoreDevDependencies": true,
+
+    "packages": [
+      {
+        "name": "jest",
+        "reason": "Development dependency",
+        "expires": "2027-01-01"
+      },
+
+      {
+        "name": "eslint",
+        "reason": "Development tool",
+        "expires": "2027-01-01"
+      }
+    ]
+  },
+
+  "novuln": {
+    "rules": [
+      {
+        "id": "HARDCODED_TEST_SECRET",
+        "reason": "Test environment only",
+        "expires": "2026-10-01"
+      }
+    ]
+  }
+}
