@@ -451,6 +451,18 @@ function parseAudit(auditReport, exceptions) {
   const rawVulns = auditReport.vulnerabilities || {};
   const ignoreDev = exceptions.ignoreDevDependencies;
 
+  // Cross-reference root package.json devDependencies
+  let devDeps = new Set();
+  try {
+    const pkgContent = safeReadFileSync("package.json", "utf8");
+    if (pkgContent) {
+      const pkgJson = JSON.parse(pkgContent);
+      devDeps = new Set(Object.keys(pkgJson.devDependencies || {}));
+    }
+  } catch (e) {
+    // Fallback if package.json cannot be read or parsed
+  }
+
   const counts = zeroCounts();
   const warningCounts = zeroCounts();
   const acceptedCounts = zeroCounts();
@@ -466,7 +478,14 @@ function parseAudit(auditReport, exceptions) {
     const severity = AUDIT_SEVERITY_ALIASES[rawSeverity] || rawSeverity;
     if (!(severity in counts)) continue;
 
-    const developmentDependency = Boolean(entry.isDevDependency || entry.dev);
+    // Check entry flags OR cross-reference root devDependencies & dev tool prefixes
+    const isDirectOrScopedDev = 
+      devDeps.has(pkgName) || 
+      Array.from(devDeps).some(d => pkgName.startsWith(d) || pkgName.startsWith(`@${d}`));
+
+    const developmentDependency = Boolean(
+      entry.isDevDependency || entry.dev || isDirectOrScopedDev
+    );
     
     const finding = {
       identifier: "N/A",

@@ -26,9 +26,19 @@
   "novuln": {
     "rules": [
       {
-        "id": "HARDCODED_TEST_SECRET",
-        "reason": "Test environment only",
-        "expires": "2026-10-01"
+        "id": "JS-TRAV-101",
+        "reason": "Internal safe helper file operations in scripts/security-gate.js",
+        "expires": "2027-01-01"
+      },
+      {
+        "id": "JS-CMD-101",
+        "reason": "Internal process execution helper in scripts/security-gate.js",
+        "expires": "2027-01-01"
+      },
+      {
+        "id": "JS-SSRF-101",
+        "reason": "Supertest local test suite call in tests/app.test.js",
+        "expires": "2027-01-01"
       }
     ]
   }

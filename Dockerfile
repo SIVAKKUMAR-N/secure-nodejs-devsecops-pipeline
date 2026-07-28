@@ -13,6 +13,9 @@ FROM node:22-alpine
 
 WORKDIR /app
 
+# Remove global npm CLI to eliminate base image vulnerabilities
+RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
+
 # Copy production dependencies
 COPY --from=deps /app/node_modules ./node_modules
 
