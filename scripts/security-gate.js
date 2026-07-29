@@ -575,6 +575,7 @@ function isExceptionValid(exception) {
 // =====================================================================
 // NoVuln SAST Parser
 // =====================================================================
+
 function parseNoVuln(summary, exceptions) {
   const findings = safeArray(summary.findings || summary.issues);
   const counts = zeroCounts();
@@ -582,28 +583,12 @@ function parseNoVuln(summary, exceptions) {
   const blocking = [];
   const accepted = [];
 
-  if (findings.length === 0) {
-    return {
-      counts: {
-        critical: safeNumber(summary.critical),
-        high: safeNumber(summary.high),
-        medium: safeNumber(summary.medium),
-        low: safeNumber(summary.low),
-        unknown: safeNumber(summary.unknown)
-      },
-      acceptedCounts,
-      warningCounts: zeroCounts(),
-      blockingItems: [],
-      acceptedItems: [],
-      warningItems: []
-    };
-  }
-
-  // Extract waived rules list or dict
+  // Extract waived rules array or object dict
   const rulesList = safeArray(exceptions.novulnRawRules || exceptions.novuln?.rules);
   const rulesDict = exceptions.novulnRules || {};
 
   for (const finding of findings) {
+    // Force lowercase severity to match zeroCounts keys ('critical', 'high', 'medium', 'low')
     const rawSeverity = (finding.severity || "unknown").toLowerCase();
     const severity = rawSeverity === "moderate" ? "medium" : rawSeverity;
     const ruleId = finding.id || finding.ruleId || finding.rule || "UNKNOWN";
@@ -633,13 +618,22 @@ function parseNoVuln(summary, exceptions) {
     if (exception && isExceptionValid(exception, ruleId)) {
       standardFinding.reason = exception.reason || "Accepted Risk";
       accepted.push(standardFinding);
-      acceptedCounts[severity] = (acceptedCounts[severity] || 0) + 1;
+      if (severity in acceptedCounts) {
+        acceptedCounts[severity]++;
+      } else {
+        acceptedCounts[severity] = 1;
+      }
     } else {
       blocking.push(standardFinding);
-      counts[severity] = (counts[severity] || 0) + 1;
+      if (severity in counts) {
+        counts[severity]++;
+      } else {
+        counts[severity] = 1;
+      }
     }
   }
 
+  // FORCE counts to strictly reflect unaccepted blocking findings only
   return { 
     counts, 
     acceptedCounts, 
