@@ -595,15 +595,14 @@ function parseNoVuln(summary, exceptions) {
     };
   }
 
-  // Extract waived rules list safely (handles novuln.rules array or novulnRules object)
+  // Extract waived rules list safely
   const rulesList = safeArray(exceptions.novuln?.rules || exceptions.novulnRules);
   const rulesDict = (!Array.isArray(exceptions.novulnRules) && exceptions.novulnRules) || {};
 
   for (const finding of findings) {
-    const severity = (finding.severity || "unknown").toLowerCase();
+    const rawSeverity = (finding.severity || "unknown").toLowerCase();
+    const severity = rawSeverity === "moderate" ? "medium" : rawSeverity;
     const ruleId = finding.id || finding.ruleId || finding.rule || "UNKNOWN";
-
-    if (!(severity in counts)) continue;
 
     // Search array using for-of loop (avoids AST false positives triggered by .find())
     let exception = null;
@@ -630,19 +629,23 @@ function parseNoVuln(summary, exceptions) {
     if (exception && isExceptionValid(exception)) {
       standardFinding.reason = exception.reason || "Accepted Risk";
       accepted.push(standardFinding);
-      if (severity in acceptedCounts) {
-        acceptedCounts[severity]++;
-      }
+      acceptedCounts[severity] = (acceptedCounts[severity] || 0) + 1;
     } else {
       blocking.push(standardFinding);
-      if (severity in counts) {
-        counts[severity]++;
-      }
+      counts[severity] = (counts[severity] || 0) + 1;
     }
   }
 
-  return { counts, acceptedCounts, warningCounts: zeroCounts(), blockingItems: blocking, acceptedItems: accepted, warningItems: [] };
+  return { 
+    counts, 
+    acceptedCounts, 
+    warningCounts: zeroCounts(), 
+    blockingItems: blocking, 
+    acceptedItems: accepted, 
+    warningItems: [] 
+  };
 }
+
 // =====================================================================
 // Risk Engine & Score Computation
 // =====================================================================
