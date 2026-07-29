@@ -1,0 +1,60 @@
+name: Feature Pipeline
+
+on:
+  push:
+    branches:
+      - "feature/**"
+
+jobs:
+  feature-ci:
+    runs-on: ubuntu-latest
+
+    steps:
+      # Checkout repository
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      # Setup Node.js
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # Install Gitleaks CLI
+      - name: Install Gitleaks
+        env:
+          GITLEAKS_VERSION: v8.30.1
+        run: |
+           wget https://github.com/gitleaks/gitleaks/releases/download/${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION#v}_linux_x64.tar.gz
+           tar -xzf gitleaks_${GITLEAKS_VERSION#v}_linux_x64.tar.gz
+           sudo install -m 755 gitleaks /usr/local/bin/gitleaks
+           gitleaks version
+      # Run Secret Scan
+      - name: Run Gitleaks Scan
+        run: |
+          gitleaks detect --source . --verbose
+
+      # Install project dependencies
+      - name: Install Dependencies
+        run: npm ci
+
+      # Run automated tests
+      - name: Run Tests
+        run: npm test
+
+      # Install NoVuln CLI
+      - name: Install NoVuln
+        run: npm install -g novuln-backend
+
+      # Run SAST Scan
+      - name: Run NoVuln Scan
+        run: novuln scan . --ci
+
+      # Upload scan reports
+      - name: Upload NoVuln Reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: novuln-security-report
+          path: |
+            report.json
+            summary.json

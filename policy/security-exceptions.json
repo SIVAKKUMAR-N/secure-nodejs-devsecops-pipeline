@@ -1,0 +1,59 @@
+{
+  "trivy": {
+    "cves": []
+  },
+  "audit": {
+    "ignoreDevDependencies": true,
+    "packages": [
+      {
+        "name": "jest",
+        "reason": "Development-only testing framework, not deployed to production environment",
+        "expires": "2027-01-01"
+      },
+      {
+        "name": "@jest/core",
+        "reason": "Development-only testing dependency",
+        "expires": "2027-01-01"
+      },
+      {
+        "name": "brace-expansion",
+        "reason": "Transitive dev dependency from jest test runner",
+        "expires": "2027-01-01"
+      },
+      {
+        "name": "glob",
+        "reason": "Transitive dev dependency from jest test runner",
+        "expires": "2027-01-01"
+      },
+      {
+        "name": "minimatch",
+        "reason": "Transitive dev dependency from jest test runner",
+        "expires": "2027-01-01"
+      }
+    ]
+  },
+  "novuln": {
+    "rules": [
+      {
+        "id": "JS-TRAV-101",
+        "reason": "Internal safe helper file operations in scripts/security-gate.js",
+        "expires": "2027-01-01"
+      },
+      {
+        "id": "JS-CMD-101",
+        "reason": "Internal process execution helper in scripts/security-gate.js",
+        "expires": "2027-01-01"
+      },
+      {
+        "id": "JS-SSRF-101",
+        "reason": "Supertest local test suite call in tests/app.test.js",
+        "expires": "2027-01-01"
+      },
+      {
+        "id": "JS-SQLI-101",
+        "reason": "False positive AST array lookup in scripts/security-gate.js",
+        "expires": "2027-01-01"
+      }
+    ]
+  }
+}
