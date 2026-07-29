@@ -548,10 +548,29 @@ function parseAudit(auditReport, exceptions) {
 
   return { counts: finalCounts, acceptedCounts, warningCounts, blockingItems: blocking, warningItems: warnings, acceptedItems: accepted };
 }
-// =====================================================================
-// NoVuln Parser
-// =====================================================================
 
+// =====================================================================
+// Helper: Exception Validity Check
+// =====================================================================
+function isExceptionValid(exception) {
+  if (!exception) return false;
+
+  // Check expiration date if present
+  const expiryStr = exception.expires || exception.expiresOn || exception.expiration;
+  if (expiryStr) {
+    const expiryDate = new Date(expiryStr);
+    const now = new Date();
+    if (expiryDate < now) {
+      return false; // Exception expired
+    }
+  }
+
+  return true;
+}
+
+// =====================================================================
+// NoVuln SAST Parser
+// =====================================================================
 function parseNoVuln(summary, exceptions) {
   const findings = safeArray(summary.findings || summary.issues);
   const counts = zeroCounts();
@@ -576,7 +595,7 @@ function parseNoVuln(summary, exceptions) {
     };
   }
 
-  // Safely extract waived rules array from exceptions.novuln.rules or exceptions.novulnRules
+  // Extract waived rules list safely (handles novuln.rules array or novulnRules object)
   const rulesList = safeArray(exceptions.novuln?.rules || exceptions.novulnRules);
   const rulesDict = (!Array.isArray(exceptions.novulnRules) && exceptions.novulnRules) || {};
 
@@ -589,7 +608,7 @@ function parseNoVuln(summary, exceptions) {
     // Search array using for-of loop (avoids AST false positives triggered by .find())
     let exception = null;
     for (const r of rulesList) {
-      if (r.id === ruleId || r.ruleId === ruleId) {
+      if (r.id === ruleId || r.ruleId === ruleId || r.rule === ruleId) {
         exception = r;
         break;
       }
@@ -603,23 +622,27 @@ function parseNoVuln(summary, exceptions) {
     const standardFinding = {
       identifier: ruleId,
       severity,
-      package: finding.file || finding.filePath || finding.path || "N/A",
+      package: finding.filePath || finding.file || finding.path || "N/A",
       ...finding
     };
 
-    if (exception && isExceptionValid(exception, ruleId)) {
+    // Validate exception expiration safely
+    if (exception && isExceptionValid(exception)) {
       standardFinding.reason = exception.reason || "Accepted Risk";
       accepted.push(standardFinding);
-      acceptedCounts[severity]++;
+      if (severity in acceptedCounts) {
+        acceptedCounts[severity]++;
+      }
     } else {
       blocking.push(standardFinding);
-      counts[severity]++;
+      if (severity in counts) {
+        counts[severity]++;
+      }
     }
   }
 
   return { counts, acceptedCounts, warningCounts: zeroCounts(), blockingItems: blocking, acceptedItems: accepted, warningItems: [] };
 }
-
 // =====================================================================
 // Risk Engine & Score Computation
 // =====================================================================
