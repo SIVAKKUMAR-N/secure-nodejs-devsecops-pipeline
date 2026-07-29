@@ -316,6 +316,7 @@ function loadExceptions() {
     trivyCves: Object.create(null),
     auditPackages: Object.create(null),
     novulnRules: Object.create(null),
+    novulnRawRules: [],
     ignoreDevDependencies: false
   };
 
@@ -343,7 +344,8 @@ function loadExceptions() {
   }
 
   const novulnRules = Object.create(null);
-  for (const rule of safeArray(rawExceptions.novuln?.rules)) {
+  const novulnRawRules = safeArray(rawExceptions.novuln?.rules);
+  for (const rule of novulnRawRules) {
     if (typeof rule === "string") novulnRules[rule] = { id: rule };
     else if (rule.id) novulnRules[rule.id] = rule;
   }
@@ -352,10 +354,12 @@ function loadExceptions() {
     trivyCves,
     auditPackages,
     novulnRules,
+    novulnRawRules,
+    novuln: rawExceptions.novuln,
+    audit: rawExceptions.audit,
     ignoreDevDependencies: Boolean(rawExceptions.audit?.ignoreDevDependencies)
   };
 }
-
 // =====================================================================
 // Report Validation & Loading
 // =====================================================================
@@ -595,16 +599,16 @@ function parseNoVuln(summary, exceptions) {
     };
   }
 
-  // Extract waived rules list safely
-  const rulesList = safeArray(exceptions.novuln?.rules || exceptions.novulnRules);
-  const rulesDict = (!Array.isArray(exceptions.novulnRules) && exceptions.novulnRules) || {};
+  // Extract waived rules list or dict
+  const rulesList = safeArray(exceptions.novulnRawRules || exceptions.novuln?.rules);
+  const rulesDict = exceptions.novulnRules || {};
 
   for (const finding of findings) {
     const rawSeverity = (finding.severity || "unknown").toLowerCase();
     const severity = rawSeverity === "moderate" ? "medium" : rawSeverity;
     const ruleId = finding.id || finding.ruleId || finding.rule || "UNKNOWN";
 
-    // Search array using for-of loop (avoids AST false positives triggered by .find())
+    // 1. Search array using for-of loop (avoids AST false positives triggered by .find())
     let exception = null;
     for (const r of rulesList) {
       if (r.id === ruleId || r.ruleId === ruleId || r.rule === ruleId) {
@@ -613,7 +617,7 @@ function parseNoVuln(summary, exceptions) {
       }
     }
 
-    // Fallback to dictionary lookup if rulesDict is a plain object mapping
+    // 2. Fallback to dictionary lookup if array search came up empty
     if (!exception && rulesDict[ruleId]) {
       exception = rulesDict[ruleId];
     }
@@ -626,7 +630,7 @@ function parseNoVuln(summary, exceptions) {
     };
 
     // Validate exception expiration safely
-    if (exception && isExceptionValid(exception)) {
+    if (exception && isExceptionValid(exception, ruleId)) {
       standardFinding.reason = exception.reason || "Accepted Risk";
       accepted.push(standardFinding);
       acceptedCounts[severity] = (acceptedCounts[severity] || 0) + 1;
