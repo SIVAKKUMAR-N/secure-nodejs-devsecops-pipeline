@@ -1,5 +1,5 @@
 # ---------- Dependencies ----------
-FROM node:22-alpine AS deps
+FROM node:22.23.2-alpine3.24 AS deps
 
 WORKDIR /app
 
@@ -9,7 +9,7 @@ RUN npm ci --omit=dev \
     && npm cache clean --force
 
 # ---------- Production ----------
-FROM node:22-alpine
+FROM node:22.23.2-alpine3.24
 
 WORKDIR /app
 
