@@ -13,7 +13,6 @@ FROM node:22-bookworm-slim
 
 WORKDIR /app
 
-
 # Copy production dependencies
 COPY --from=deps /app/node_modules ./node_modules
 
@@ -21,8 +20,8 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
 # Create non-root user
-RUN addgroup -S appgroup \
-    && adduser -S appuser -G appgroup \
+RUN groupadd --system appgroup \
+    && useradd --system --gid appgroup appuser \
     && chown -R appuser:appgroup /app
 
 USER appuser
