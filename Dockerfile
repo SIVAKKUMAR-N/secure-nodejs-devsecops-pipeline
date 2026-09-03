@@ -11,6 +11,9 @@ RUN npm ci --omit=dev \
 # ---------- Production ----------
 FROM node:22.23.2-alpine3.24
 
+# Update OpenSSL packages to patched versions
+RUN apk update && apk upgrade --no-cache
+
 WORKDIR /app
 
 COPY --from=deps /app/node_modules ./node_modules
