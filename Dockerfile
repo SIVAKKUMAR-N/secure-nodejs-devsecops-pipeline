@@ -1,5 +1,5 @@
 # ---------- Dependencies ----------
-FROM node:22-alpine AS deps
+FROM node:22-bookworm-slim AS deps
 
 WORKDIR /app
 
@@ -9,7 +9,7 @@ RUN npm ci --omit=dev \
     && npm cache clean --force
 
 # ---------- Production ----------
-FROM node:22-alpine
+FROM node:22-bookworm-slim
 
 WORKDIR /app
 
