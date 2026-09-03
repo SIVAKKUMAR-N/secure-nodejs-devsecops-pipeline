@@ -1,5 +1,5 @@
 # ---------- Dependencies ----------
-FROM node:22-bookworm-slim AS deps
+FROM node:22-alpine AS deps
 
 WORKDIR /app
 
@@ -9,19 +9,16 @@ RUN npm ci --omit=dev \
     && npm cache clean --force
 
 # ---------- Production ----------
-FROM node:22-bookworm-slim
+FROM node:22-alpine
 
 WORKDIR /app
 
-# Copy production dependencies
 COPY --from=deps /app/node_modules ./node_modules
 
-# Copy application
 COPY . .
 
-# Create non-root user
-RUN groupadd --system appgroup \
-    && useradd --system --gid appgroup appuser \
+RUN addgroup -S appgroup \
+    && adduser -S appuser -G appgroup \
     && chown -R appuser:appgroup /app
 
 USER appuser
