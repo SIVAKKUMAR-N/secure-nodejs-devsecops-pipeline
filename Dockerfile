@@ -16,6 +16,11 @@ RUN apk update && apk upgrade --no-cache
 
 WORKDIR /app
 
+# Remove npm tooling from production image
+RUN rm -rf /usr/local/lib/node_modules/npm \
+    && rm -f /usr/local/bin/npm \
+    && rm -f /usr/local/bin/npx
+    
 COPY --from=deps /app/node_modules ./node_modules
 
 COPY . .
