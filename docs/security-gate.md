@@ -1,0 +1,946 @@
+# Security Gate v3
+
+## Overview
+
+The Security Gate is the central policy enforcement component of the DevSecOps pipeline.
+
+Security scanners generate findings independently, but the Security Gate provides a single location where those findings are evaluated against the project's security policy.
+
+The Security Gate determines the final build decision:
+
+```text
+Security Reports
+       │
+       ▼
+Security Gate
+       │
+       ▼
+Security Policy Evaluation
+       │
+       ├── PASS ──► Build Allowed
+       │
+       └── FAIL ──► Build Blocked
+```
+
+The gate is designed to separate:
+
+- Security scanning
+- Security policy
+- Security exceptions
+- Policy enforcement
+- Reporting
+
+This makes the security pipeline easier to maintain and allows policy changes without rewriting scanner integrations.
+
+---
+
+## Core Responsibilities
+
+The Security Gate performs the following functions:
+
+- Loads the external security policy
+- Validates the security policy
+- Loads security exceptions
+- Validates exception expiry
+- Parses scanner reports
+- Evaluates findings against policy thresholds
+- Applies valid security exceptions
+- Calculates the security score
+- Generates a SHA-256 policy integrity hash
+- Records scanner versions
+- Records build metadata
+- Generates machine-readable security reports
+- Generates GitHub Actions summaries
+- Produces the final PASS or FAIL decision
+
+---
+
+## Architecture
+
+```text
+                    ┌─────────────────────┐
+                    │   Security Scanners │
+                    └──────────┬──────────┘
+                               │
+          ┌────────────────────┼────────────────────┐
+          │                    │                    │
+          ▼                    ▼                    ▼
+       NoVuln              npm Audit             Trivy
+          │                    │                    │
+          └────────────────────┼────────────────────┘
+                               │
+                               ▼
+                    ┌─────────────────────┐
+                    │  Security Reports   │
+                    └──────────┬──────────┘
+                               │
+                               ▼
+                    ┌─────────────────────┐
+                    │   SECURITY GATE v3  │
+                    └──────────┬──────────┘
+                               │
+               ┌───────────────┼───────────────┐
+               │                               │
+               ▼                               ▼
+    security-policy.json           security-exceptions.json
+               │                               │
+               └───────────────┬───────────────┘
+                               │
+                               ▼
+                      Policy Evaluation
+                               │
+                               ▼
+                    Security Score Calculation
+                               │
+                               ▼
+                       PASS / FAIL Decision
+```
+
+---
+
+## Security Policy
+
+The Security Gate uses an external security policy.
+
+The policy defines the acceptable security thresholds for supported scanners.
+
+The policy is stored separately from the Security Gate implementation.
+
+Conceptually:
+
+```text
+Security Policy
+       │
+       ▼
+Policy Validation
+       │
+       ▼
+Scanner Findings
+       │
+       ▼
+Threshold Comparison
+       │
+       ▼
+Policy Decision
+```
+
+This separation allows security teams or project maintainers to modify thresholds without changing the Security Gate code.
+
+---
+
+## Policy Validation
+
+The Security Gate validates the policy before processing security reports.
+
+The gate follows a fail-closed design.
+
+If the policy cannot be safely validated, the Security Gate should fail instead of continuing with an unreliable configuration.
+
+Validation includes:
+
+- Required policy sections
+- Required scanner configuration
+- Threshold structure
+- Numeric threshold values
+- Score weight configuration
+- Numeric score weights
+- Non-negative score weights
+
+### scoreWeights Validation
+
+The `scoreWeights` configuration is validated before security scoring is performed.
+
+Requirements include:
+
+```text
+scoreWeights
+    │
+    ├── Must exist
+    │
+    ├── Must be an object
+    │
+    ├── Every configured value must be numeric
+    │
+    └── Every configured value must be >= 0
+```
+
+Example of a valid configuration:
+
+```json
+{
+  "scoreWeights": {
+    "critical": 25,
+    "high": 15,
+    "medium": 7,
+    "low": 2,
+    "unknown": 0,
+    "accepted": 1
+  }
+}
+```
+
+Example of an invalid configuration:
+
+```json
+{
+  "scoreWeights": {
+    "critical": "high"
+  }
+}
+```
+
+The invalid configuration must produce a clear validation error.
+
+The Security Gate should not continue with an invalid scoring configuration.
+
+---
+
+## Security Reports
+
+The Security Gate consumes security information generated by the pipeline.
+
+Typical reports include:
+
+- `audit.json`
+- `trivy-report.json`
+- `sbom.json`
+
+Security findings from supported scanners are parsed and normalized for policy evaluation.
+
+The Security Gate evaluates the findings according to the configured policy.
+
+### NoVuln Processing
+
+NoVuln performs Static Application Security Testing.
+
+The Security Gate processes the NoVuln findings and evaluates the severity counts against the configured policy thresholds.
+
+Conceptually:
+
+```text
+NoVuln Scan
+      │
+      ▼
+Source Code Findings
+      │
+      ▼
+Severity Classification
+      │
+      ▼
+Security Gate
+      │
+      ▼
+Policy Evaluation
+```
+
+The resulting findings contribute to the overall security decision.
+
+### npm Audit Processing
+
+npm audit identifies known vulnerabilities in application dependencies.
+
+The pipeline generates:
+
+```
+audit.json
+```
+
+The Security Gate parses the audit report and evaluates vulnerability severity counts.
+
+Example:
+
+```text
+npm Audit Report
+        │
+        ▼
+Critical Findings
+High Findings
+Medium Findings
+Low Findings
+        │
+        ▼
+Security Policy Thresholds
+        │
+        ▼
+PASS / FAIL
+```
+
+### Trivy Processing
+
+Trivy scans the generated Docker image for known vulnerabilities.
+
+The pipeline generates:
+
+```
+trivy-report.json
+```
+
+The Security Gate evaluates the Trivy findings according to the configured container security thresholds.
+
+Conceptually:
+
+```text
+Docker Image
+      │
+      ▼
+Trivy Scan
+      │
+      ▼
+trivy-report.json
+      │
+      ▼
+Security Gate
+      │
+      ▼
+Policy Evaluation
+```
+
+### SBOM Validation
+
+The pipeline can generate a Software Bill of Materials using CycloneDX.
+
+The SBOM is generated as:
+
+```
+sbom.json
+```
+
+The Security Gate can validate whether the SBOM is required according to the configured security policy.
+
+Example:
+
+```text
+SBOM Required?
+      │
+      ├── Yes
+      │     │
+      │     ├── Exists ──► Continue
+      │     │
+      │     └── Missing ─► FAIL
+      │
+      └── No ────────────► Continue
+```
+
+This allows SBOM requirements to be controlled through policy.
+
+---
+
+## Policy-Based Threshold Evaluation
+
+The Security Gate evaluates the total findings against the allowed threshold.
+
+**Example:**
+
+Configured Policy:
+
+```
+HIGH = 5
+```
+
+Scanner result:
+
+```
+HIGH findings = 7
+```
+
+The Security Gate reports:
+
+```
+Total Findings:      7
+Allowed Threshold:   5
+Threshold Exceeded:  Yes
+```
+
+The Security Gate does not attempt to determine which individual findings caused the threshold to be exceeded.
+
+All scanner findings remain part of the report.
+
+The gate decision is based on the policy violation.
+
+---
+
+## Blocking Logic
+
+Earlier implementations may attempt to label individual findings as "blocking."
+
+This can be misleading when policy thresholds are based on aggregate counts.
+
+**Example:**
+
+```
+Allowed HIGH findings: 5
+Detected HIGH findings: 7
+```
+
+It is not technically correct to identify two specific findings as the findings that caused the violation.
+
+The correct approach is:
+
+```
+Total Findings: 7
+Allowed Threshold: 5
+Threshold Exceeded: Yes
+```
+
+The policy violation determines whether the build fails.
+
+The Security Gate therefore evaluates aggregate policy compliance rather than assigning blocking status to individual findings.
+
+---
+
+## Security Exceptions
+
+The Security Gate supports an external security exception configuration.
+
+Exceptions allow approved security findings or rules to be handled separately from the main policy.
+
+Conceptually:
+
+```text
+Security Finding
+       │
+       ▼
+Check Exception Policy
+       │
+       ├── No Valid Exception
+       │        │
+       │        ▼
+       │   Apply Policy Normally
+       │
+       └── Valid Exception
+                │
+                ▼
+          Exception Applied
+```
+
+Exceptions should be used carefully because they represent accepted security risk.
+
+---
+
+## Exception Expiry
+
+Security exceptions can have an expiry date.
+
+The Security Gate validates exception expiry values.
+
+```text
+Exception
+    │
+    ▼
+Expiry Present?
+    │
+    ├── No ──► Process According to Exception Rules
+    │
+    └── Yes
+         │
+         ▼
+Is Date Valid?
+         │
+    ┌────┴─────┐
+    │          │
+    ▼          ▼
+Invalid      Valid
+    │          │
+    ▼          ▼
+Warning    Check Expiry
+Ignore         │
+               ▼
+        ┌──────┴──────┐
+        │             │
+        ▼             ▼
+     Expired        Active
+        │             │
+        ▼             ▼
+      Ignore        Apply
+```
+
+Malformed expiry values must not be silently accepted.
+
+**Example:**
+
+```
+expires: "tomorrow maybe"
+```
+
+This is treated as an invalid expiry value.
+
+The Security Gate should:
+
+- Print a warning
+- Ignore the invalid exception
+- Continue processing normally
+
+This prevents malformed exception data from weakening the security controls.
+
+### Expired Exceptions
+
+An expired exception is no longer considered valid.
+
+**Example:**
+
+```
+Exception Expiry: 2026-01-01
+Current Date:     After 2026-01-01
+```
+
+Result:
+
+```
+Exception Expired
+Exception Not Applied
+```
+
+The associated finding is then evaluated normally against the security policy.
+
+---
+
+## Security Score
+
+The Security Gate calculates a security score based on configured severity weights.
+
+Example:
+
+```json
+{
+  "scoreWeights": {
+    "critical": 25,
+    "high": 15,
+    "medium": 7,
+    "low": 2,
+    "unknown": 0,
+    "accepted": 1
+  }
+}
+```
+
+Conceptually:
+
+```text
+Initial Score
+     │
+     ▼
+Critical Penalty
+     │
+     ▼
+High Penalty
+     │
+     ▼
+Medium Penalty
+     │
+     ▼
+Low Penalty
+     │
+     ▼
+Accepted Risk Penalty
+     │
+     ▼
+Final Security Score
+```
+
+The score provides an additional summary metric.
+
+The final build decision remains based on policy evaluation and configured enforcement logic.
+
+---
+
+## Policy Integrity Hash
+
+The Security Gate generates a SHA-256 hash of the loaded security policy.
+
+Architecture:
+
+```text
+security-policy.json
+        │
+        ▼
+     SHA-256
+        │
+        ▼
+   policyHash
+        │
+        ▼
+Security Report
+```
+
+Example:
+
+```json
+{
+  "policyHash": "8ab472d0..."
+}
+```
+
+The policy hash improves traceability.
+
+It allows future builds or audits to determine exactly which policy content was used during a Security Gate execution.
+
+The implementation uses Node.js's built-in `crypto` module.
+
+---
+
+## Scanner Version Tracking
+
+The Security Gate records versions of security scanners and runtime components.
+
+Tracked information includes:
+
+- NoVuln version
+- Trivy version
+- npm version
+- Node.js version
+
+Example:
+
+```json
+{
+  "scannerVersions": {
+    "novuln": "2.1.0",
+    "trivy": "0.66.0",
+    "npm": "11.5.2",
+    "node": "22.18.0"
+  }
+}
+```
+
+If a version cannot be determined, `unknown` is stored.
+
+Conceptually:
+
+```text
+NoVuln ─────┐
+Trivy ──────┤
+npm ────────┼──► Version Collection ──► Security Report
+Node.js ────┘
+```
+
+Version tracking improves:
+
+- Build traceability
+- Auditability
+- Reproducibility
+- Security investigation
+
+---
+
+## Build Metadata
+
+The Security Gate records available build metadata.
+
+When running inside GitHub Actions, metadata may include:
+
+- Repository
+- Workflow
+- Job
+- Runner
+- Run ID
+- Run Number
+- Commit SHA
+- Git reference
+
+Conceptually:
+
+```text
+GitHub Actions Environment
+           │
+           ▼
+    Environment Variables
+           │
+           ▼
+     Build Metadata
+           │
+           ▼
+    Security Gate Report
+```
+
+When running outside GitHub Actions, unavailable metadata fields are stored as `null`.
+
+This allows the Security Gate to operate both locally and in CI.
+
+---
+
+## GitHub Step Summary
+
+The Security Gate supports GitHub Actions Step Summary output.
+
+This provides a readable summary directly within the GitHub Actions workflow.
+
+The summary can include:
+
+- Overall gate decision
+- Scanner results
+- Policy violations
+- Security score
+- Execution information
+
+The summary output is separate from the machine-readable JSON report.
+
+---
+
+## Machine-Readable Reports
+
+The Security Gate generates machine-readable output for automation and future integrations.
+
+The report can contain information such as:
+
+- Gate Result
+- Security Findings
+- Policy Evaluation
+- Policy Violations
+- Security Score
+- Accepted Exceptions
+- Policy Hash
+- Scanner Versions
+- Build Metadata
+- Execution Timing
+
+Machine-readable reports can be used for:
+
+- CI artifacts
+- Security dashboards
+- Historical analysis
+- Automation
+- Auditing
+
+---
+
+## Console Output
+
+The Security Gate improves console readability using ANSI colors.
+
+Suggested status behavior:
+
+| Status | Color |
+|---|---|
+| PASS | Green |
+| WARNING | Yellow |
+| FAIL | Red |
+| INFO | Cyan |
+
+ANSI formatting is applied only to console output.
+
+It does not modify:
+
+- JSON reports
+- GitHub Step Summary output
+
+This keeps machine-readable outputs clean.
+
+---
+
+## Fail-Closed Design
+
+The Security Gate follows a fail-closed approach.
+
+If required security information cannot be safely processed, the gate should fail instead of assuming the build is secure.
+
+Examples include:
+
+- Missing required reports
+- Invalid security policy
+- Invalid policy values
+- Invalid scoring configuration
+- Required SBOM missing
+- Unreadable security reports
+- Malformed required data
+
+Conceptually:
+
+```text
+Can Security State Be Safely Determined?
+                 │
+          ┌──────┴──────┐
+          │             │
+          ▼             ▼
+         Yes            No
+          │             │
+          ▼             ▼
+   Evaluate Policy      FAIL
+```
+
+This design reduces the risk of accidental security bypass.
+
+---
+
+## Security Gate Execution Flow
+
+The overall execution flow can be represented as:
+
+```text
+Start
+  │
+  ▼
+Load Security Policy
+  │
+  ▼
+Validate Policy
+  │
+  ├── Invalid ──► FAIL
+  │
+  ▼
+Generate Policy Hash
+  │
+  ▼
+Load Exceptions
+  │
+  ▼
+Validate Exception Expiry
+  │
+  ▼
+Check Required Reports
+  │
+  ├── Missing Required Report ──► FAIL
+  │
+  ▼
+Parse Security Reports
+  │
+  ▼
+Apply Valid Exceptions
+  │
+  ▼
+Evaluate Policy Thresholds
+  │
+  ▼
+Calculate Security Score
+  │
+  ▼
+Collect Scanner Versions
+  │
+  ▼
+Collect Build Metadata
+  │
+  ▼
+Generate Reports
+  │
+  ▼
+Generate GitHub Summary
+  │
+  ▼
+PASS / FAIL
+```
+
+---
+
+## Exit Behavior
+
+The Security Gate preserves its existing exit behavior.
+
+Conceptually:
+
+```text
+Policy Satisfied
+      │
+      ▼
+   Exit Success
+
+Policy Violated
+      │
+      ▼
+    Exit Failure
+```
+
+The exit result allows GitHub Actions and other CI systems to use the Security Gate as an enforcement point.
+
+---
+
+## Security Gate Benefits
+
+The Security Gate provides several benefits to the pipeline.
+
+**Centralized Policy Enforcement**
+
+Security decisions are made in one location rather than being scattered across multiple workflow steps.
+
+**Policy Separation**
+
+Security thresholds can be changed through configuration rather than source code modifications.
+
+**Exception Management**
+
+Approved security exceptions can be handled explicitly and can expire automatically.
+
+**Improved Traceability**
+
+The policy hash, scanner versions, and build metadata improve the ability to understand how a security decision was made.
+
+**Consistent Decisions**
+
+Multiple scanners can produce different report formats.
+
+The Security Gate provides a centralized policy evaluation layer for those results.
+
+**CI Integration**
+
+The Security Gate integrates with:
+
+- Local execution
+- GitHub Actions
+- JSON reporting
+- GitHub Step Summary
+- CI artifacts
+
+---
+
+## Current Feature Summary
+
+The current Security Gate provides:
+
+- ✓ External Security Policy
+- ✓ External Exception Policy
+- ✓ Exception Expiry
+- ✓ Invalid Expiry Detection
+- ✓ NoVuln Processing
+- ✓ npm Audit Processing
+- ✓ Trivy Processing
+- ✓ Optional SBOM Validation
+- ✓ Security Score
+- ✓ Policy Validation
+- ✓ scoreWeights Validation
+- ✓ Fail-Closed Behavior
+- ✓ Accurate Threshold Evaluation
+- ✓ Scanner Execution Timing
+- ✓ Scanner Version Tracking
+- ✓ Policy Integrity Hash
+- ✓ GitHub Actions Metadata
+- ✓ GitHub Step Summary
+- ✓ JSON Reporting
+- ✓ ANSI Console Output
+- ✓ PASS / FAIL Decision
+
+---
+
+## Design Principle
+
+The core design principle of the Security Gate is:
+
+```text
+Security Scanners
+       │
+       ▼
+Security Evidence
+       │
+       ▼
+Policy Evaluation
+       │
+       ▼
+Explicit Decision
+```
+
+The scanners detect security information.
+
+The policy defines acceptable risk.
+
+The Security Gate connects the two and produces the final decision.
+
+This separates security detection from security governance and allows the pipeline to evolve without tightly coupling security policy to individual scanners.
+
+---
+
+Then, in your shorter `README.md`, link it like this:
+
+```md
+## Security Gate
+
+The project uses a custom policy-based Security Gate to centralize security decisions, process exceptions, validate scanner results, and enforce security thresholds.
+
+For detailed documentation, see [Security Gate Documentation](docs/security-gate.md).
+```

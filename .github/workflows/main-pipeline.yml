@@ -9,6 +9,9 @@ on:
       - synchronize
       - reopened
 
+  push:
+    branches:
+      - main    
 jobs:
   security-pipeline:
     runs-on: ubuntu-latest
